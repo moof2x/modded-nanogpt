@@ -548,18 +548,22 @@ def fused_softcapped_entropy_fwd_kernel(
     row_idx = tl.program_id(0).to(tl.int64)
     logits_row_ptr = logits_ptr + row_idx * stride_logits_n
 
-    max_val = -float('inf')
-    sum_exp = 0.0
+    _A = tl.cast(A, tl.float32)
+    _B = tl.cast(B, tl.float32)
+    _C = tl.cast(C, tl.float32)
+    _neg_inf = tl.cast(-float('inf'), tl.float32)
+    max_val = _neg_inf
+    sum_exp = tl.cast(0.0, tl.float32)
 
-    inv_C = 1.0 / C
-    B_div_C = B * inv_C
+    inv_C = tl.cast(1.0, tl.float32) / _C
+    B_div_C = _B * inv_C
 
     for off in range(0, n_cols, BLOCK_SIZE):
         cols = off + tl.arange(0, BLOCK_SIZE)
         mask = cols < n_cols
-        val = tl.load(logits_row_ptr + cols, mask=mask, other=-float('inf')).to(tl.float32)
-        z = A * tl.sigmoid(val * inv_C + B_div_C)
-        z = tl.where(mask, z, -float('inf'))
+        val = tl.load(logits_row_ptr + cols, mask=mask, other=float('-inf')).to(tl.float32)
+        z = _A * tl.sigmoid(val * inv_C + B_div_C)
+        z = tl.where(mask, z, _neg_inf)
         curr_max = tl.max(z, axis=0)
         new_max = tl.maximum(max_val, curr_max)
         sum_exp = sum_exp * tl.exp(max_val - new_max) + tl.sum(tl.exp(z - new_max), axis=0)
@@ -568,7 +572,7 @@ def fused_softcapped_entropy_fwd_kernel(
     lse = max_val + tl.log(sum_exp)
     tl.store(lse_ptr + row_idx, lse)
 
-    total_loss = 0.0
+    total_loss = tl.cast(0.0, tl.float32)
     for k in range(n_predict):
         target_idx = row_idx + k
         if target_idx < n_rows:
@@ -577,7 +581,7 @@ def fused_softcapped_entropy_fwd_kernel(
                 target = tl.load(targets_ptr + target_idx).to(tl.int32)
                 if target >= 0 and target < n_cols:
                     val_target = tl.load(logits_row_ptr + target).to(tl.float32)
-                    z_target = A * tl.sigmoid(val_target * inv_C + B_div_C)
+                    z_target = _A * tl.sigmoid(val_target * inv_C + B_div_C)
                     total_loss += weight * (lse - z_target)
 
     tl.store(losses_ptr + row_idx, total_loss)
@@ -600,13 +604,16 @@ def fused_softcapped_entropy_bwd_kernel(
     lse = tl.load(lse_ptr + row_idx)
     grad_loss = tl.load(grad_output_ptr + row_idx)
 
-    inv_C = 1.0 / C
-    B_div_C = B * inv_C
-    inv_C_A = inv_C * A
-    inv_grad_s = 1.0 / grad_s
+    _A = tl.cast(A, tl.float32)
+    _B = tl.cast(B, tl.float32)
+    _C = tl.cast(C, tl.float32)
+    inv_C = tl.cast(1.0, tl.float32) / _C
+    B_div_C = _B * inv_C
+    inv_C_A = inv_C * _A
+    inv_grad_s = tl.cast(1.0, tl.float32) / tl.cast(grad_s, tl.float32)
 
     # Preload all targets and weights before the column loop
-    S_w = 0.0
+    S_w: tl.float32 = 0.0
     t0: tl.int32 = -1
     t1: tl.int32 = -1
     t2: tl.int32 = -1
@@ -642,7 +649,7 @@ def fused_softcapped_entropy_bwd_kernel(
         val = tl.load(logits_row_ptr + cols, mask=mask, other=0.0).to(tl.float32)
         u = val * inv_C + B_div_C
         sigmoid_u = tl.sigmoid(u)
-        z = A * sigmoid_u
+        z = _A * sigmoid_u
         p = tl.exp(z - lse)
 
         term1 = S_w * p
@@ -656,7 +663,7 @@ def fused_softcapped_entropy_bwd_kernel(
             term2 += tl.where(cols == t2, w2, 0.0)
 
         grad_z = term1 - term2
-        grad_x = grad_scale_icA * grad_z * sigmoid_u * (1.0 - sigmoid_u)
+        grad_x = grad_scale_icA * grad_z * sigmoid_u * (tl.cast(1.0, tl.float32) - sigmoid_u)
         grad_x = grad_x.to(tl.float8e5)
         tl.store(grad_row_ptr + cols, grad_x, mask=mask)
 
