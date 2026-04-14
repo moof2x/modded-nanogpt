@@ -1379,7 +1379,7 @@ def _load_data_shard(file: Path):
     return tokens
 
 BOS_ID = 50256
-TRAIN_MAX_NUM_DOCS = {16384: 64, 32768: 128, 49152: 256, 65536: 384, 98304: 512}
+TRAIN_MAX_NUM_DOCS = {16384: 64, 32768: 96, 49152: 128}
 
 class Shard:
     def __init__(self, tokens: Tensor, world_size: int = 1):
@@ -1559,11 +1559,11 @@ class Hyperparameters:
     # batch sizes
     val_batch_size: int = 4 * 64 * 1024 * 8
     # schedule
-    num_scheduled_iterations: int = 850  # number of steps to complete lr and ws schedule
-    num_extension_iterations: int = 25  # number of steps to continue training at final lr and ws
+    num_scheduled_iterations: int = 1450  # number of steps to complete lr and ws schedule
+    num_extension_iterations: int = 45  # number of steps to continue training at final lr and ws
     # evaluation and logging
     run_id: str = f"{uuid.uuid4()}"
-    val_loss_every: int = 125  # every how many steps to evaluate val loss? 0 for only at the end
+    val_loss_every: int = 250  # every how many steps to evaluate val loss? 0 for only at the end
     save_checkpoint: bool = False
     run_evals: bool = False  # run additional evaluations after training is completed
     # bigram hash embedding
@@ -1638,14 +1638,14 @@ class TrainingSchedule:
 
 # window_sizes are in units of `block_size` tokens (defined in TrainingManager)
 TRAINING_STAGES = [
-    TrainingStage(duration=1/3, train_max_seq_len=896, batch_size=16 * 2048 * 8, window_sizes=(1, 3), lr_mul=1.52,
+    TrainingStage(duration=1/3, train_max_seq_len=896, batch_size=8 * 2048 * 8, window_sizes=(1, 3), lr_mul=1.0,
                   mtp_weights_start=[1.0, 0.5, 0.25], mtp_weights_end=[1.0, 0.5, 0.0]),
-    TrainingStage(duration=1/3, train_max_seq_len=2048, batch_size=32 * 2048 * 8, window_sizes=(3, 7), lr_mul=2.30,  # (16/8)**0.6
+    TrainingStage(duration=1/3, train_max_seq_len=2048, batch_size=16 * 2048 * 8, window_sizes=(3, 7), lr_mul=1.52,  # (16/8)**0.6
                   mtp_weights_start=[1.0, 0.5], mtp_weights_end=[1.0, 0.0]),
-    TrainingStage(duration=1/3, train_max_seq_len=2048, batch_size=48 * 2048 * 8, window_sizes=(5, 11), lr_mul=2.45,  # (24/8)**0.5
+    TrainingStage(duration=1/3, train_max_seq_len=2048, batch_size=24 * 2048 * 8, window_sizes=(5, 11), lr_mul=1.73,  # (24/8)**0.5
                   mtp_weights_start=[1.0], mtp_weights_end=[1.0]),
     # extension stage
-    TrainingStage(train_max_seq_len=2048, batch_size=48 * 2048 * 8, window_sizes=(6, 13), lr_mul=1.0,  # lr_mul is not used
+    TrainingStage(train_max_seq_len=2048, batch_size=24 * 2048 * 8, window_sizes=(6, 13), lr_mul=1.0,  # lr_mul is not used
                   mtp_weights_start=[1.0], mtp_weights_end=[1.0]),
 ]
 
